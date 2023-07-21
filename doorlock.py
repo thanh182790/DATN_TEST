@@ -31,6 +31,10 @@ config = {
 firebase = pyrebase.initialize_app(config)
 db = firebase.database()
 storage = firebase.storage()
+
+# variable to save Id user in RTDB that has face or ID card correctly
+global IdUser
+IdUser = ""
 # when start must be set open in firebase = false to prevent door open when start 
 db.child("Global_variable").child("open").set("False")
 
@@ -250,6 +254,23 @@ def KeypadHandlerThread():
 		print("Press buttons on your keypad. Ctrl+C to exit.")
 		while True:
 			time.sleep(1)
+
+#Return a Dicitonary example: {'Iduser1':[RFID_value_1,Lable_name1,Id_user_sign_in_1(optional)],
+# 'Iduser2':[RFID_value_2,Lable_name_2,Id_user_sign_in_2(optional)]}
+def GetDictValueAuthenUser():
+	RefUsers = db.child("users").get()
+	DictValAuthUser = {}
+	for user in RefUsers.each():
+		 DictValAuthUser[user.val()['id']] = [user.val()['idcard'],user.val()['lablename']]
+	return DictValAuthUser
+
+def CheckIdExistinRTDB(id,lstValAuth, lsIdUser):
+	global IdUser
+	for x in lstValAuth:
+		if id in x:
+			IdUser = lsIdUser[lstValAuth.index(x)]
+			return True
+	return False
 def RFIDThread():
 	global DOOR_CLOSED, INPUT_PASS
 	print(DOOR_CLOSED)
@@ -279,7 +300,12 @@ def RFIDThread():
 			pass
 		else:
 			if DOOR_CLOSED:
-				if id in  DEFAULT_RFID:
+				dictValAuth = GetDictValueAuthenUser()
+				listValAuth = list(dictValAuth.values())
+				listIDUser = list(dictValAuth.keys())
+				if (id != "") and CheckIdExistinRTDB(id, listValAuth, listIDUser):
+					#Need get Id of user tag and time open door to put RTDB
+					print(f"Currenr Id = {IdUser}")
 					DOOR_CLOSED = False
 					pi.set_servo_pulsewidth(SER_VO, 2000) # open door
 					GPIO.output(LED_OK, GPIO.HIGH)
