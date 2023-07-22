@@ -16,7 +16,7 @@ import pickle
 import cv2
 import os
 import pigpio
-
+import datetime
 import pyrebase
 
 import  pyshine as ps #  pip3 install pyshine==0.0.9
@@ -41,18 +41,25 @@ db.child("Global_variable").child("open").set("False")
 #initial for face recogition
 PROTOTXT_DETECTOR = "/home/pi/Desktop/Face_reconition/deploy.prototxt"
 MODLE_DETECTOR = "/home/pi/Desktop/Face_reconition/res10_300x300_ssd_iter_140000.caffemodel"
-PATH_ENCODING = "/home/pi/Desktop/Face_reconition/encoding.pickle"
-CONFIDENCE = 0.99
+# PATH_ENCODING = "/home/pi/Desktop/Face_reconition/encoding.pickle"
+PATH_ENCODING = "/home/pi/Desktop/Face_reconition/Mahoa.pickle"
+CONFIDENCE_DETECTFACE = 0.9
 THRESOLD_MATCH_FACE_ENCODING = 0.4
 detector_net = cv2.dnn.readNetFromCaffe(PROTOTXT_DETECTOR, MODLE_DETECTOR)
-kwargs_picamera= {"brightness": 70,"contrast": 20, "awb_mode":"tungsten"}
+kwargs_picamera= {"brightness": 75,"contrast": 50, "awb_mode":"tungsten", "sharpness":100}
 
+#get data encoded that save from pi 
+global encoded_data
+global number_frame_added # use when add face -> will need 500 pictures to encoding
+number_frame_added =0
 with open(PATH_ENCODING, 'rb') as file:
-		encoded_data = pickle.loads(file.read())
+	encoded_data = pickle.loads(file.read())
 
 print('[INFO] starting video stream...')
 vs = VideoStream(usePiCamera = True,resolution=(1280, 720),framerate=30,**kwargs_picamera).start()
-# vs =  VideoStream(src=1).start()
+# vs =  VideoStream(src = 1).start()
+# vs = cv2.VideoCapture(1)
+
 time.sleep(2) 
 
 #variable global
@@ -205,12 +212,16 @@ def DelayUnlockThread():
 			DELAY_UNLOCK = False
 			DOOR_CLOSED = True
 		time.sleep(2)
-			
+
+def getObjectHistory(Iduser, Type_Open, Value, Date, Status, UrlImage):	
+	return {"idUser": Iduser, "typeOpen":Type_Open, "value":Value, "datetime": Date, "status": Status, "UrlImage": UrlImage}
 def KeypadHandlerInterrupt(key):
 	print(f"Received key from interrupt:: {key}")
 	global INPUT_PASS,  DOOR_CLOSED
 	if DOOR_CLOSED:
 		if "A" == key:
+			status = ""
+			date_time = datetime.datetime.now().strftime("%d_%m_%Y, %H:%M:%S")
 			DEFAULT_PASSWORD = db.child("Global_variable").child("passdoor").get()
 			if(INPUT_PASS == DEFAULT_PASSWORD.val()):
 				DOOR_CLOSED = False
@@ -220,18 +231,21 @@ def KeypadHandlerInterrupt(key):
 				My_lcd.lcd_clear()
 				My_lcd.lcd_display_string(" PASS CORRECT",1,2)
 				My_lcd.lcd_display_string("DOOR OPENED",2,3)
+				status = "Success"
 			else:
 				GPIO.output(LED_NOT_OK, GPIO.HIGH)
+				time.sleep(0.1)
+				GPIO.output(LED_NOT_OK, GPIO.LOW)
+				time.sleep(0.1)
+				GPIO.output(LED_NOT_OK, GPIO.HIGH)
+				time.sleep(0.1)
+				GPIO.output(LED_NOT_OK, GPIO.LOW)
 				My_lcd.lcd_clear()
-				time.sleep(0.1)
 				My_lcd.lcd_display_string("PASS INCORRECT!",1,1)
-				time.sleep(0.1)
-				GPIO.output(LED_NOT_OK, GPIO.LOW)
-				time.sleep(0.1)
-				GPIO.output(LED_NOT_OK, GPIO.HIGH)	
-				time.sleep(0.1)
-				GPIO.output(LED_NOT_OK, GPIO.LOW)
 				print(f"DOOR_CLOSED = {DOOR_CLOSED}")
+				status = "Fail"
+			record_history = getObjectHistory("", "Password", INPUT_PASS, date_time, status, "")
+			db.child("History").child(date_time).set(record_history)
 			INPUT_PASS =""
 			print(f"INPUT PASS =  {INPUT_PASS}")
 		elif "C" == key:
@@ -264,6 +278,7 @@ def GetDictValueAuthenUser():
 		 DictValAuthUser[user.val()['id']] = [user.val()['idcard'],user.val()['lablename']]
 	return DictValAuthUser
 
+#check Id card has exist in RTDB
 def CheckIdExistinRTDB(id,lstValAuth, lsIdUser):
 	global IdUser
 	for x in lstValAuth:
@@ -271,6 +286,7 @@ def CheckIdExistinRTDB(id,lstValAuth, lsIdUser):
 			IdUser = lsIdUser[lstValAuth.index(x)]
 			return True
 	return False
+
 def RFIDThread():
 	global DOOR_CLOSED, INPUT_PASS
 	print(DOOR_CLOSED)
@@ -300,6 +316,9 @@ def RFIDThread():
 			pass
 		else:
 			if DOOR_CLOSED:
+				global IdUser
+				status = ""
+				date_time = datetime.datetime.now().strftime("%d_%m_%Y, %H:%M:%S")
 				dictValAuth = GetDictValueAuthenUser()
 				listValAuth = list(dictValAuth.values())
 				listIDUser = list(dictValAuth.keys())
@@ -313,7 +332,7 @@ def RFIDThread():
 					My_lcd.lcd_clear()
 					My_lcd.lcd_display_string(" TAG CORRECT",1,2)
 					My_lcd.lcd_display_string("DOOR OPENED",2,3)
-					
+					status = "Success"
 				else:
 					GPIO.output(LED_NOT_OK, GPIO.HIGH)
 					time.sleep(0.1)
@@ -324,11 +343,44 @@ def RFIDThread():
 					GPIO.output(LED_NOT_OK, GPIO.LOW)
 					My_lcd.lcd_clear()
 					My_lcd.lcd_display_string("TAG INCORRECT!",1,1)
+					status = "Fail"
+					IdUser = ""
+				record_history = getObjectHistory(IdUser, "RFID", id, date_time, status, "")
+				db.child("History").child(date_time).set(record_history)
 				INPUT_PASS =""
 		
 
-# def AddFaceThread():
-	
+def GetBboundingBoxes_AddFace(detections, image):
+	# grab the dimensions of the image 
+	(height, width) = image.shape[:2]
+	boxes_return = []
+	confidence_return = []
+	# loop over the detections
+	for i in range(0, detections.shape[2]):
+		# extract the confidence (i.e., probability) associated with
+		# the detection
+		confidence = detections[0, 0, i, 2]
+		# filter out weak detections by ensuring the confidence is
+		# greater than the minimum confidence
+		if confidence > 0.99:
+			# compute the (x, y)-coordinates of the bounding box for
+			# the object
+			box = detections[0, 0, i, 3:7] * np.array([width, height, width, height])
+			(startX, startY, endX, endY) = box.astype("int")
+			# update our bounding box results list
+			boxes_return.append((startX, startY, endX, endY))
+			confidence_return.append(confidence)
+	# return the face detection bounding boxes
+	return boxes_return, confidence_return
+
+#check lablename has in RTDB	
+def ChecklableNameExistinRTDB(lablename,lstValAuth, lsIdUser):
+	global IdUser
+	for x in lstValAuth:
+		if lablename in x:
+			IdUser = lsIdUser[lstValAuth.index(x)]
+			return True
+	return False
 
 def FaceHandlerThread():
 	global INPUT_PASS, DOOR_CLOSED
@@ -340,6 +392,9 @@ def FaceHandlerThread():
 	# time.sleep(2) # wait camera to warmup
 	while True:
 		frame = vs.read()
+		# _, frame = vs.read()
+		if frame is  None:
+			continue
 		frame = imutils.resize(frame, width=400)
 		(h, w) = frame.shape[:2]
 		blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
@@ -347,16 +402,48 @@ def FaceHandlerThread():
 		# and obtain the detections and predictions
 		detector_net.setInput(blob)
 		detections = detector_net.forward()
-		
-		if DOOR_CLOSED:
-			# iterate over the detections
+		addface = db.child("Global_variable").child("face").child("addface").get()
+		deleteface = db.child("Global_variable").child("face").child("deleteface").get()
+		if addface.val() == 'True':
+			global number_frame_added, encoded_data
+			db.child("Global_variable").child("face").child("status").set("working add face")
+			Boxes_addface, confidence_addface = GetBboundingBoxes_AddFace(detections,frame)
+			#frame dont have any face or has than 1 face in a a frame-> skip, not encodes
+			if len(Boxes_addface) == 1:
+				if number_frame_added == 0: # ensure that only read lablename 1 time when addface of new user
+					lablename = db.child("Global_variable").child("face").child("lablename").get()
+				number_frame_added += 1
+				print(f"Number frame read : {number_frame_added}")
+				startX_addface = max(0, Boxes_addface[0][0])
+				startY_addface = max(0, Boxes_addface[0][1])
+				endX_addface = min(w, Boxes_addface[0][2])
+				endY_addface = min(h, Boxes_addface[0][3])
+				bounding_box_addface = [(startY_addface, endX_addface, endY_addface, startX_addface)]
+				face_encod_rgb_addface = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+				encodings_addface = face_recognition.face_encodings(face_encod_rgb_addface,bounding_box_addface)
+				for encoding in encodings_addface:
+					# add each encoding and name to the list
+					encoded_data['encodings'].append(encoding)
+					encoded_data['names'].append(lablename.val())
+				if number_frame_added == 100:
+					number_frame_added = 0
+					#write encoded_data to Pi 
+					with open(PATH_ENCODING, 'wb') as file:
+						file.write(pickle.dumps(encoded_data))
+					db.child("Global_variable").child("face").child("addface").set("False")
+					db.child("Global_variable").child("face").child("status").set("completed")
+		elif deleteface.val() == 'True':
+			pass
+		# elif DOOR_CLOSED:
+		elif DOOR_CLOSED:
+			# iterate over the detections detections.shape = (1,1,200,7)
 			for i in range(0, detections.shape[2]):
 				# print(detections.shape[2])
 				# extract the confidence (i.e. probability) associated with the prediction
 				confidence = detections[0, 0, i, 2]
 
 				# filter out weak detections
-				if confidence > CONFIDENCE:
+				if confidence > CONFIDENCE_DETECTFACE:
 					# compute the (x,y) coordinates of the bounding box
 					# for the face and extract the face ROI
 					box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
@@ -396,7 +483,10 @@ def FaceHandlerThread():
 									
 								# get the name with the most count
 								name = max(counts, key=counts.get)
-								if name != "X":
+								dictValAuth = GetDictValueAuthenUser()
+								listValAuth = list(dictValAuth.values())
+								listIdUser = list(dictValAuth.keys())
+								if (name != "" ) and ChecklableNameExistinRTDB(name,listValAuth, listIdUser):
 									DOOR_CLOSED = False
 									pi.set_servo_pulsewidth(SER_VO, 2000) # open door
 									GPIO.output(LED_OK, GPIO.HIGH)
@@ -455,7 +545,7 @@ def StreamThread():
 	address = ('192.168.1.69',9000) # Enter your IP address 
 	try:
 		StreamProps.set_Mode(StreamProps,'cv2')
-		capture = cv2.VideoCapture(1, cv2.CAP_V4L)
+		capture = cv2.VideoCapture(2, cv2.CAP_V4L)
 		capture.set(cv2.CAP_PROP_BUFFERSIZE,4)
 		capture.set(cv2.CAP_PROP_FRAME_WIDTH,320)
 		capture.set(cv2.CAP_PROP_FRAME_HEIGHT,240)
