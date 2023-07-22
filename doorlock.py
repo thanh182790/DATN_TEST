@@ -22,10 +22,10 @@ import pyrebase
 import  pyshine as ps #  pip3 install pyshine==0.0.9
 #initial for database
 config = {     
-  "apiKey": "AIzaSyAOMX9Qrb-y6DHZG22JqBJNTCh-3AGY2Ug",
-  "authDomain": "project-smart-lock.firebaseapp.com",
-  "databaseURL": "https://project-smart-lock-default-rtdb.firebaseio.com",
-  "storageBucket": "project-smart-lock.appspot.com"
+  "apiKey": "AIzaSyBL9p5Gp7hkprcNy_Bj9TGZFQnJW8YaM3Y",
+  "authDomain": "finalproject-db669.firebaseapp.com",
+  "databaseURL": "https://finalproject-db669-default-rtdb.firebaseio.com",
+  "storageBucket": "finalproject-db669.appspot.com"
 }
 
 firebase = pyrebase.initialize_app(config)
@@ -349,7 +349,6 @@ def RFIDThread():
 				db.child("History").child(date_time).set(record_history)
 				INPUT_PASS =""
 		
-
 def GetBboundingBoxes_AddFace(detections, image):
 	# grab the dimensions of the image 
 	(height, width) = image.shape[:2]
@@ -488,11 +487,19 @@ def FaceHandlerThread():
 								listIdUser = list(dictValAuth.keys())
 								if (name != "" ) and ChecklableNameExistinRTDB(name,listValAuth, listIdUser):
 									DOOR_CLOSED = False
+									cv2.imwrite(f"/home/pi/Desktop/Project/Imgae_Face/{name}.jpg", frame)
 									pi.set_servo_pulsewidth(SER_VO, 2000) # open door
 									GPIO.output(LED_OK, GPIO.HIGH)
 									print("welcom " + name + " back home")
 									My_lcd.lcd_clear()
 									My_lcd.lcd_display_string("welcom " + name,1,2)
+									status = "Success"
+									date_time = datetime.datetime.now().strftime("%d_%m_%Y, %H:%M:%S")
+									storage.child("FaceRecognition/"+date_time +f"/{name}.jpg" ).put(f"/home/pi/Desktop/Project/Imgae_Face/{name}.jpg")
+									Url = storage.child("FaceRecognition/"+date_time +f"/{name}.jpg").get_url(None)
+									os.remove(f"/home/pi/Desktop/Project/Imgae_Face/{name}.jpg")
+									record_history = getObjectHistory(IdUser, "Face recognition", name, date_time, status, Url)
+									db.child("History").child(date_time).set(record_history)
 								elif name == "X":
 									print('Face match found!')
 									My_lcd.lcd_clear()
