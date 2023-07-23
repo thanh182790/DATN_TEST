@@ -42,7 +42,9 @@ db.child("Global_variable").child("open").set("False")
 PROTOTXT_DETECTOR = "/home/pi/Desktop/Face_reconition/deploy.prototxt"
 MODLE_DETECTOR = "/home/pi/Desktop/Face_reconition/res10_300x300_ssd_iter_140000.caffemodel"
 # PATH_ENCODING = "/home/pi/Desktop/Face_reconition/encoding.pickle"
-PATH_ENCODING = "/home/pi/Desktop/Face_reconition/Mahoa.pickle"
+PATH_ENCODING = "/home/pi/Desktop/Project/Mahoa.pickle"
+# PATH_ENCODING = "/home/pi/Desktop/Face_reconition/Mahoa.pickle"
+
 CONFIDENCE_DETECTFACE = 0.9
 THRESOLD_MATCH_FACE_ENCODING = 0.4
 detector_net = cv2.dnn.readNetFromCaffe(PROTOTXT_DETECTOR, MODLE_DETECTOR)
@@ -54,6 +56,8 @@ global number_frame_added # use when add face -> will need 500 pictures to encod
 number_frame_added =0
 with open(PATH_ENCODING, 'rb') as file:
 	encoded_data = pickle.loads(file.read())
+global new_encoding #use to add new encding face then will gán ngược lại encoded_data để lưu xuống máy
+new_encoding = {'encodings': [], 'names': []}
 
 print('[INFO] starting video stream...')
 vs = VideoStream(usePiCamera = True,resolution=(1280, 720),framerate=30,**kwargs_picamera).start()
@@ -214,7 +218,7 @@ def DelayUnlockThread():
 		time.sleep(2)
 
 def getObjectHistory(Iduser, Type_Open, Value, Date, Status, UrlImage):	
-	return {"idUser": Iduser, "typeOpen":Type_Open, "value":Value, "datetime": Date, "status": Status, "UrlImage": UrlImage}
+	return {"idUser": Iduser, "typeOpen":Type_Open, "value":Value, "datetime": str(Date), "status": Status, "UrlImage": UrlImage}
 def KeypadHandlerInterrupt(key):
 	print(f"Received key from interrupt:: {key}")
 	global INPUT_PASS,  DOOR_CLOSED
@@ -269,20 +273,20 @@ def KeypadHandlerThread():
 		while True:
 			time.sleep(1)
 
-#Return a Dicitonary example: {'Iduser1':[RFID_value_1,Lable_name1,Id_user_sign_in_1(optional)],
-# 'Iduser2':[RFID_value_2,Lable_name_2,Id_user_sign_in_2(optional)]}
+#Return a Dicitonary example: {'Iduser1':[RFID_value_1,Lable_name1,IsActive1],
+# 'Iduser2':[RFID_value_2,Lable_name_2,IsActive2]}
 def GetDictValueAuthenUser():
 	RefUsers = db.child("users").get()
 	DictValAuthUser = {}
 	for user in RefUsers.each():
-		 DictValAuthUser[user.val()['id']] = [user.val()['idcard'],user.val()['lablename']]
+		 DictValAuthUser[user.val()['id']] = [user.val()['idcard'],user.val()['lablename'], user.val()['active']]
 	return DictValAuthUser
 
 #check Id card has exist in RTDB
-def CheckIdExistinRTDB(id,lstValAuth, lsIdUser):
+def Check_RFID_ExistandActiveinRTDB(id,lstValAuth, lsIdUser):
 	global IdUser
 	for x in lstValAuth:
-		if id in x:
+		if (id in x) and (x[2] == True):
 			IdUser = lsIdUser[lstValAuth.index(x)]
 			return True
 	return False
@@ -322,7 +326,7 @@ def RFIDThread():
 				dictValAuth = GetDictValueAuthenUser()
 				listValAuth = list(dictValAuth.values())
 				listIDUser = list(dictValAuth.keys())
-				if (id != "") and CheckIdExistinRTDB(id, listValAuth, listIDUser):
+				if (id != "") and Check_RFID_ExistandActiveinRTDB(id, listValAuth, listIDUser):
 					#Need get Id of user tag and time open door to put RTDB
 					print(f"Currenr Id = {IdUser}")
 					DOOR_CLOSED = False
@@ -376,7 +380,7 @@ def GetBboundingBoxes_AddFace(detections, image):
 def ChecklableNameExistinRTDB(lablename,lstValAuth, lsIdUser):
 	global IdUser
 	for x in lstValAuth:
-		if lablename in x:
+		if (lablename in x) and (x[2] == True):
 			IdUser = lsIdUser[lstValAuth.index(x)]
 			return True
 	return False
@@ -403,9 +407,11 @@ def FaceHandlerThread():
 		detections = detector_net.forward()
 		addface = db.child("Global_variable").child("face").child("addface").get()
 		deleteface = db.child("Global_variable").child("face").child("deleteface").get()
-		if addface.val() == 'True':
-			global number_frame_added, encoded_data
-			db.child("Global_variable").child("face").child("status").set("working add face")
+		canceladdface = db.child("Global_variable").child("face").child("canceladdface").get()
+		global number_frame_added, encoded_data, new_encoding
+		if addface.val() == 'True' and canceladdface.val() == 'False':
+			if number_frame_added == 0:
+				db.child("Global_variable").child("face").child("status").set("working add face")
 			Boxes_addface, confidence_addface = GetBboundingBoxes_AddFace(detections,frame)
 			#frame dont have any face or has than 1 face in a a frame-> skip, not encodes
 			if len(Boxes_addface) == 1:
@@ -422,15 +428,23 @@ def FaceHandlerThread():
 				encodings_addface = face_recognition.face_encodings(face_encod_rgb_addface,bounding_box_addface)
 				for encoding in encodings_addface:
 					# add each encoding and name to the list
-					encoded_data['encodings'].append(encoding)
-					encoded_data['names'].append(lablename.val())
-				if number_frame_added == 100:
+					new_encoding['encodings'].append(encoding)
+					new_encoding['names'].append(lablename.val())
+				if number_frame_added == 50:
 					number_frame_added = 0
+					encoded_data['encodings'] += new_encoding['encodings']
+					encoded_data['names']+= new_encoding['names']
+					new_encoding = {'encodings': [], 'names': []}
 					#write encoded_data to Pi 
 					with open(PATH_ENCODING, 'wb') as file:
 						file.write(pickle.dumps(encoded_data))
 					db.child("Global_variable").child("face").child("addface").set("False")
 					db.child("Global_variable").child("face").child("status").set("completed")
+		elif canceladdface.val() == 'True':
+			number_frame_added = 0
+			new_encoding = {'encodings': [], 'names': []}
+			time.sleep(2)
+			db.child("Global_variable").child("face").child("canceladdface").set("False")
 		elif deleteface.val() == 'True':
 			pass
 		# elif DOOR_CLOSED:
