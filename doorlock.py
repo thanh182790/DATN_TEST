@@ -21,7 +21,7 @@ import pyrebase
 
 import  pyshine as ps #  pip3 install pyshine==0.0.9
 #initial for database
-config = {     
+config = {
   "apiKey": "AIzaSyBL9p5Gp7hkprcNy_Bj9TGZFQnJW8YaM3Y",
   "authDomain": "finalproject-db669.firebaseapp.com",
   "databaseURL": "https://finalproject-db669-default-rtdb.firebaseio.com",
@@ -108,8 +108,8 @@ GPIO.output(LED_NOT_OK, GPIO.LOW)
 # connect servo to the RPI
 pi = pigpio.pi()
 pi.set_servo_pulsewidth(SER_VO, 0)
-if GPIO.input(SENSOR_PIN):
-	pi.set_servo_pulsewidth(SER_VO, 1000) #If when start door open -> close door
+if GPIO.input(SENSOR_PIN): #If when start door open -> close door
+	pi.set_servo_pulsewidth(SER_VO, 2000)
 
 #initial Lcd
 My_lcd = I2C_LCD_driver.Lcd() 
@@ -128,7 +128,7 @@ def SensorHandlerThread():
 		while CLOSE_BY_APP != True and DELAY_UNLOCK != True:
 			if GPIO.input(SENSOR_PIN): #if door is openning 
 				time.sleep(5)
-				pi.set_servo_pulsewidth(SER_VO, 1000) # close door
+				pi.set_servo_pulsewidth(SER_VO, 2000) # close door
 				GPIO.output(LED_OK, GPIO.LOW)
 				My_lcd.lcd_clear()
 				My_lcd.lcd_display_string("DOOR CLOED",1,3)
@@ -147,7 +147,7 @@ def OpenFromAppThread():
 			db.child("Global_variable").child("open").set("False")
 			if GPIO.input(SENSOR_PIN) == GPIO.LOW: #if door is closing
 				GPIO.output(LED_OK,GPIO.HIGH)
-				pi.set_servo_pulsewidth(SER_VO, 2000) #open door
+				pi.set_servo_pulsewidth(SER_VO, 1000) #open door
 				global OPEN_BY_APP, DOOR_CLOSED
 				DOOR_CLOSED = False
 				OPEN_BY_APP = True
@@ -161,7 +161,7 @@ def CloseFromAppThread():
 			if GPIO.input(SENSOR_PIN) == GPIO.HIGH:#if door is openning
 				global CLOSE_BY_APP, DOOR_CLOSED
 				CLOSE_BY_APP = True
-				pi.set_servo_pulsewidth(SER_VO, 1000) #close door
+				pi.set_servo_pulsewidth(SER_VO, 2000) #close door
 				DOOR_CLOSED = False
 				GPIO.output(LED_OK,GPIO.LOW)
 				CLOSE_BY_APP = False
@@ -183,7 +183,7 @@ def DelayUnlockThread():
 			timeRemaining = timeDelay
 			if GPIO.input(SENSOR_PIN) == GPIO.LOW: #if door is closing
 				GPIO.output(LED_OK,GPIO.HIGH)
-				pi.set_servo_pulsewidth(SER_VO, 2000) #open door
+				pi.set_servo_pulsewidth(SER_VO, 1000) #open door
 				DOOR_CLOSED = False
 				My_lcd.lcd_clear()
 				My_lcd.lcd_display_string("DOOR FREE", 1 , 2)
@@ -198,7 +198,7 @@ def DelayUnlockThread():
 					My_lcd.lcd_clear()
 					My_lcd.lcd_display_string("TIME OUT FREE",1,1)
 					My_lcd.lcd_display_string("DOOR CLOSED",2,2)
-					pi.set_servo_pulsewidth(SER_VO, 1000) #close door
+					pi.set_servo_pulsewidth(SER_VO, 2000) #close door
 					GPIO.output(LED_OK,GPIO.LOW)
 					print("breaking")
 					break
@@ -229,7 +229,7 @@ def KeypadHandlerInterrupt(key):
 			DEFAULT_PASSWORD = db.child("Global_variable").child("passdoor").get()
 			if(INPUT_PASS == DEFAULT_PASSWORD.val()):
 				DOOR_CLOSED = False
-				pi.set_servo_pulsewidth(SER_VO, 2000) # position anti-clockwise
+				pi.set_servo_pulsewidth(SER_VO, 1000) # position anti-clockwise
 				GPIO.output(LED_OK, GPIO.HIGH)
 				print(f"DOOR_CLOSED = {DOOR_CLOSED}")
 				My_lcd.lcd_clear()
@@ -330,7 +330,7 @@ def RFIDThread():
 					#Need get Id of user tag and time open door to put RTDB
 					print(f"Currenr Id = {IdUser}")
 					DOOR_CLOSED = False
-					pi.set_servo_pulsewidth(SER_VO, 2000) # open door
+					pi.set_servo_pulsewidth(SER_VO, 1000) # open door
 					GPIO.output(LED_OK, GPIO.HIGH)
 					print(f"DOOR_CLOSED = {DOOR_CLOSED}")
 					My_lcd.lcd_clear()
@@ -502,7 +502,7 @@ def FaceHandlerThread():
 								if (name != "" ) and ChecklableNameExistinRTDB(name,listValAuth, listIdUser):
 									DOOR_CLOSED = False
 									cv2.imwrite(f"/home/pi/Desktop/Project/Imgae_Face/{name}.jpg", frame)
-									pi.set_servo_pulsewidth(SER_VO, 2000) # open door
+									pi.set_servo_pulsewidth(SER_VO, 1000) # open door
 									GPIO.output(LED_OK, GPIO.HIGH)
 									print("welcom " + name + " back home")
 									My_lcd.lcd_clear()
@@ -550,7 +550,7 @@ def StreamThread():
 	<html>
 	<head>
 	<meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Live Streaming From WebCam</title>
 	</head>
 
@@ -560,13 +560,13 @@ def StreamThread():
 	</body>
 	</html>
 	"""
-
+	capture = cv2.VideoCapture(1, cv2.CAP_V4L)
 	StreamProps = ps.StreamProps
 	StreamProps.set_Page(StreamProps,HTML)
+	#address = ('192.168.55.140',9000) # Enter your IP address 
 	address = ('192.168.1.69',9000) # Enter your IP address 
 	try:
 		StreamProps.set_Mode(StreamProps,'cv2')
-		capture = cv2.VideoCapture(2, cv2.CAP_V4L)
 		capture.set(cv2.CAP_PROP_BUFFERSIZE,4)
 		capture.set(cv2.CAP_PROP_FRAME_WIDTH,320)
 		capture.set(cv2.CAP_PROP_FRAME_HEIGHT,240)
